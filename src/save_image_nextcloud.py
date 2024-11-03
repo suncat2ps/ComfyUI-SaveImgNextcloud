@@ -2,7 +2,7 @@ import os
 import requests
 from datetime import datetime
 import logging
-from PIL import Image, PngImagePlugin
+from PIL import Image
 import numpy as np
 import json
 from comfy.cli_args import args
@@ -55,31 +55,32 @@ class SaveImageNextcloud:
                 filename_with_time = f"{timestamp}_{idx}_{filename}"
                 save_path = f"/tmp/{filename_with_time}"
 
-                # 메타데이터 처리
+                img_exif = img.getexif()
+
                 if not args.disable_metadata:
-                    # EXIF 메타데이터 객체 생성
-                    img_exif = img.getexif() if hasattr(img, 'getexif') else None
-                    metadata = PngImagePlugin.PngInfo()
-
-                    # 프롬프트 데이터를 메타데이터에 추가
                     if prompt is not None:
-                        prompt_text = json.dumps(prompt)
-                        if img_exif is not None:
-                            img_exif[0x010F] = "Prompt:" + prompt_text  # Manufacturer 필드 사용
-                        metadata.add_text("Prompt", prompt_text)
-
-                    # 추가적인 pnginfo 데이터를 메타데이터에 추가
+                        prompt_text = "".join(json.dumps(prompt))
+                        img_exif[0x010f] = "prompt: " + prompt_text
                     if extra_pnginfo is not None:
-                        workflow_metadata = ""
-                        for key in extra_pnginfo:
-                            workflow_metadata += json.dumps(extra_pnginfo[key])
-                        if img_exif is not None:
-                            img_exif[0x010E] = "Workflow:" + workflow_metadata  # Image Description 필드 사용
-                        metadata.add_text("Workflow", workflow_metadata)
+                        workflow_metadata = str()
+                        for x in extra_pnginfo:
+                            workflow_metadata += "".join(json.dumps(extra_pnginfo[x]))
+                        img_exif[0x010e] = "workflow: " + workflow_metadata
 
                 # 이미지 저장 (AVIF 포맷)
                 img.save(save_path, "AVIF", quality=c_quality, speed=enc_speed, exif=img_exif)
                 logging.debug(f"Image saved to {save_path}")
+
+                # 워크플로우를 JSON 파일로 저장
+                if extra_pnginfo is not None:
+                    workflow_save_path = f"/tmp/{filename_with_time}.json"
+                    with open(workflow_save_path, 'w') as json_file:
+                        workflow_metadata = str()
+                        for x in extra_pnginfo:
+                            workflow_metadata += "".join(json.dumps(extra_pnginfo[x]))
+                        json_file.write(workflow_metadata)
+                    logging.debug(f"Workflow JSON saved to {workflow_save_path}")
+                    self._upload_to_nextcloud(today_date, f"{filename_with_time}.json", workflow_save_path)
 
                 # Nextcloud에 업로드
                 self._upload_to_nextcloud(today_date, filename_with_time, save_path)
@@ -88,6 +89,8 @@ class SaveImageNextcloud:
                 # 임시 파일 제거
                 if os.path.exists(save_path):
                     os.remove(save_path)
+                if extra_pnginfo is not None and os.path.exists(workflow_save_path):
+                    os.remove(workflow_save_path)
 
         return {}
 
