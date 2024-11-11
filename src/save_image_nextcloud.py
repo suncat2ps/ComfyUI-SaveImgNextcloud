@@ -32,7 +32,11 @@ class SaveImageNextcloud:
                 "images": ("IMAGE",),
                 "filename": ("STRING", {"default": "image.avif"}),
                 "c_quality": ("INT", {"default": 75, "min": 0, "max": 100, "step": 1}),
-                "enc_speed": ("INT", {"default": 6, "min": 0, "max": 10, "step": 1})
+                "enc_speed": ("INT", {"default": 6, "min": 0, "max": 10, "step": 1}),
+                "create_thumbnail": ("BOOLEAN", {"default": True}),
+                "thumbnail_size": ("INT", {"default": 250, "min": 50, "max": 500, "step": 10}),
+                "thumbnail_quality": ("INT", {"default": 30, "min": 10, "max": 100, "step": 5}),
+                "save_workflow_json": ("BOOLEAN", {"default": False})
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}
         }
@@ -42,7 +46,7 @@ class SaveImageNextcloud:
     CATEGORY = "api/image"
     OUTPUT_NODE = True
 
-    def save_to_nextcloud(self, images, filename, c_quality=75, enc_speed=6, prompt=None, extra_pnginfo=None):
+    def save_to_nextcloud(self, images, filename, c_quality=75, enc_speed=6, prompt=None, extra_pnginfo=None, thumbnail_size=100, thumbnail_quality=30, create_thumbnail=True, save_workflow_json=True):
         logging.debug(f"CALL save_to_nextcloud")
         today_date = datetime.now().strftime("%Y%m%d")
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -60,19 +64,28 @@ class SaveImageNextcloud:
                 if not args.disable_metadata:
                     if prompt is not None:
                         prompt_text = "".join(json.dumps(prompt))
-                        img_exif[0x010f] = "prompt: " + prompt_text
+                        img_exif[0x010f] = "Prompt: " + prompt_text
                     if extra_pnginfo is not None:
                         workflow_metadata = str()
                         for x in extra_pnginfo:
                             workflow_metadata += "".join(json.dumps(extra_pnginfo[x]))
-                        img_exif[0x010e] = "workflow: " + workflow_metadata
+                        img_exif[0x010e] = "Workflow: " + workflow_metadata
 
                 # 이미지 저장 (AVIF 포맷)
                 img.save(save_path, "AVIF", quality=c_quality, speed=enc_speed, exif=img_exif)
                 logging.debug(f"Image saved to {save_path}")
 
+                # 썸네일 생성 및 WEBP로 저장
+                if create_thumbnail:
+                    thumbnail_path = f"/tmp/{timestamp}_{idx}_{filename}_thumbnail.webp"
+                    img.thumbnail((thumbnail_size, thumbnail_size), Image.LANCZOS)  # 썸네일 크기 줄이기, 비율 유지
+                    img.save(thumbnail_path, "WEBP", quality=thumbnail_quality, exif=img_exif)  # 썸네일을 WebP로 저장하며 품질 줄이기
+                    logging.debug(f"Thumbnail saved to {thumbnail_path}")
+                    self._upload_to_nextcloud(today_date, f"{timestamp}_{idx}_{filename}_thumbnail.webp",
+                                              thumbnail_path)
+
                 # 워크플로우를 JSON 파일로 저장
-                if extra_pnginfo is not None:
+                if save_workflow_json and extra_pnginfo is not None:
                     workflow_save_path = f"/tmp/{filename_with_time}.json"
                     with open(workflow_save_path, 'w') as json_file:
                         workflow_metadata = str()
@@ -89,8 +102,10 @@ class SaveImageNextcloud:
                 # 임시 파일 제거
                 if os.path.exists(save_path):
                     os.remove(save_path)
-                if extra_pnginfo is not None and os.path.exists(workflow_save_path):
+                if save_workflow_json and extra_pnginfo is not None and os.path.exists(workflow_save_path):
                     os.remove(workflow_save_path)
+                if create_thumbnail and os.path.exists(thumbnail_path):
+                    os.remove(thumbnail_path)
 
         return {}
 
