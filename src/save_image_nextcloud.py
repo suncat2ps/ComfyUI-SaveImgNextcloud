@@ -16,6 +16,8 @@ load_dotenv()
 logging.basicConfig(level=logging.DEBUG)
 
 class SaveImageNextcloud:
+    SAVE_FILE_FORMATS = ["avif", "webp"]
+
     def __init__(self):
         # 환경 변수에서 인증 정보 가져오기
         self.username = os.getenv("NEXTCLOUD_USERNAME")
@@ -31,6 +33,7 @@ class SaveImageNextcloud:
             "required": {
                 "images": ("IMAGE",),
                 "filename": ("STRING", {"default": "image.avif"}),
+                "format": (s.SAVE_FILE_FORMATS,),
                 "c_quality": ("INT", {"default": 75, "min": 0, "max": 100, "step": 1}),
                 "enc_speed": ("INT", {"default": 6, "min": 0, "max": 10, "step": 1}),
                 "create_thumbnail": ("BOOLEAN", {"default": True}),
@@ -46,7 +49,7 @@ class SaveImageNextcloud:
     CATEGORY = "api/image"
     OUTPUT_NODE = True
 
-    def save_to_nextcloud(self, images, filename, c_quality=75, enc_speed=6, prompt=None, extra_pnginfo=None, thumbnail_size=100, thumbnail_quality=30, create_thumbnail=True, save_workflow_json=True):
+    def save_to_nextcloud(self, images, filename, format='avif', c_quality=75, enc_speed=6, prompt=None, extra_pnginfo=None, thumbnail_size=100, thumbnail_quality=30, create_thumbnail=True, save_workflow_json=True):
         logging.debug(f"CALL save_to_nextcloud")
         today_date = datetime.now().strftime("%Y%m%d")
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -56,7 +59,7 @@ class SaveImageNextcloud:
             try:
                 # 이미지 처리 및 파일명 생성
                 img = self._process_image(image)
-                filename_with_time = f"{timestamp}_{idx}_{filename}"
+                filename_with_time = f"{timestamp}_{idx}_{filename}.{format}"
                 save_path = f"/tmp/{filename_with_time}"
 
                 img_exif = img.getexif()
@@ -71,8 +74,11 @@ class SaveImageNextcloud:
                             workflow_metadata += "".join(json.dumps(extra_pnginfo[x]))
                         img_exif[0x010e] = "Workflow: " + workflow_metadata
 
-                # 이미지 저장 (AVIF 포맷)
-                img.save(save_path, "AVIF", quality=c_quality, speed=enc_speed, exif=img_exif)
+                # 이미지 저장 (포맷에 따라 avif 또는 webp 저장)
+                if format == 'avif':
+                    img.save(save_path, "AVIF", quality=c_quality, speed=enc_speed, exif=img_exif)
+                elif format == 'webp':
+                    img.save(save_path, "WEBP", quality=c_quality, optimize=True, exif=img_exif)
                 logging.debug(f"Image saved to {save_path}")
 
                 # 썸네일 생성 및 WEBP로 저장
